@@ -1,0 +1,48 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: quartz-service
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:postgres}
+
+  # Quartz Core Configuration
+  quartz:
+    properties:
+      org.quartz.scheduler.instanceName: EnterpriseClusteredScheduler
+      org.quartz.scheduler.instanceId: AUTO
+      org.quartz.scheduler.makeSchedulerThreadDaemon: true
+      org.quartz.threadPool.class: org.quartz.simpl.SimpleThreadPool
+      org.quartz.threadPool.threadCount: 20
+      org.quartz.threadPool.threadPriority: 5
+      org.quartz.threadPool.threadsInheritContextClassLoaderOfInitializingThread: true
+
+# Actuator & Observability
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+
+# SpringDoc OpenAPI Documentation
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+    display-request-duration: true
+
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.enterprise.quartz: DEBUG
+    org.quartz: INFO
+    org.springframework.security: INFO

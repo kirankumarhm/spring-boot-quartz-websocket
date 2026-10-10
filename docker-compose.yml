@@ -1,0 +1,61 @@
+services:
+  # Shared PostgreSQL Persistence Layer
+  postgres:
+    image: postgres:16-alpine
+    container_name: quartz-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: quartz_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/main/resources/schema-postgres.sql:/docker-entrypoint-initdb.d/01-quartz-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d quartz_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Enterprise Quartz Spring Boot Service (Java 21)
+  quartz-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quartz-spring-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/quartz_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgrespassword
+    ports:
+      - "8080:8080"
+
+  # Quartz Control Center Dashboard
+  # Connects directly to the PostgreSQL persistence layer
+  quartz-control-center:
+    image: ghcr.io/mesutpiskin/quartz-control-center:latest
+    container_name: quartz-control-center-ui
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_TYPE: postgresql
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: quartz_db
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgrespassword
+      DATABASE_SSL: "false"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

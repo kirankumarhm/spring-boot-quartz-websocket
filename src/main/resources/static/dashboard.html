@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise Quartz Scheduler Control Center</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SockJS and STOMP for Real-Time Event Streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eff6ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.35; transform: scale(0.85); }
+        }
+        .status-pulse { animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes row-ping {
+            0% { background-color: rgba(59, 130, 246, 0.25); }
+            100% { background-color: transparent; }
+        }
+        .row-highlight { animation: row-ping 2s ease-out; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-blue-600 selection:text-white">
+
+    <!-- Top Navigation Header -->
+    <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <!-- Brand & Engine Title -->
+            <div class="flex items-center space-x-3.5">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/25 text-white font-black text-xl">
+                    Q
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <h1 class="text-lg font-bold tracking-tight text-white">Quartz Control Center</h1>
+                        <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Enterprise Edition
+                        </span>
+                        <span id="clusterBadge" class="hidden sm:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            Clustered (PostgreSQL)
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-400">Spring Boot 3.4+ &bull; Java 21 LTS &bull; Real-Time STOMP &bull; RBAC Protected</p>
+                </div>
+            </div>
+
+            <!-- Top Header Controls: WebSocket status, role selector, auto-refresh, swagger -->
+            <div class="flex items-center space-x-3">
+                <!-- Real-time WebSocket Status Pill -->
+                <div class="flex items-center space-x-2 bg-slate-800/80 rounded-lg px-2.5 py-1.5 border border-slate-700/60 text-xs shadow-inner">
+                    <span id="wsStatusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 status-pulse"></span>
+                    <span id="wsStatusText" class="text-slate-300 font-mono text-[11px]">Connecting...</span>
+                </div>
+
+                <!-- Active Role Switcher -->
+                <div class="flex items-center bg-slate-800/80 rounded-lg p-1 border border-slate-700/60 text-xs">
+                    <span class="text-slate-400 px-2 font-medium">Role:</span>
+                    <select id="userRoleSelect" onchange="switchRole(this.value)" class="bg-slate-900 text-white rounded px-2.5 py-1 font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500 border border-slate-700">
+                        <option value="admin">admin (ROLE_ADMIN)</option>
+                        <option value="operator">operator (ROLE_OPERATOR)</option>
+                        <option value="viewer">viewer (ROLE_VIEWER)</option>
+                    </select>
+                </div>
+
+                <!-- Auto Refresh Interval Selector -->
+                <div class="hidden md:flex items-center bg-slate-800/80 rounded-lg p-1 border border-slate-700/60 text-xs">
+                    <button onclick="refreshCurrentTab()" title="Refresh Now" class="p-1.5 hover:bg-slate-700 rounded text-slate-300 hover:text-white transition">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    </button>
+                    <select id="autoRefreshSelect" onchange="toggleAutoRefresh(this.value)" class="bg-transparent text-slate-300 pr-1 py-1 focus:outline-none">
+                        <option value="0">Manual</option>
+                        <option value="5000">5s</option>
+                        <option value="15000" selected>15s</option>
+                        <option value="30000">30s</option>
+                    </select>
+                </div>
+
+                <!-- Swagger Link -->
+                <a href="/swagger-ui.html" target="_blank" class="hidden lg:inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition">
+                    <span>Swagger API</span>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- KPI Summary Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+            <!-- Card 1: Total Jobs -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Registered Jobs</p>
+                    <p id="statTotalJobs" class="text-2xl font-bold text-white mt-1">0</p>
+                    <p id="statGroupCount" class="text-[11px] text-slate-500 mt-0.5">0 groups</p>
+                </div>
+                <div class="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-base">#</div>
+            </div>
+
+            <!-- Card 2: Scheduled Jobs -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Scheduled Jobs</p>
+                    <p id="statActiveJobs" class="text-2xl font-bold text-emerald-400 mt-1">0</p>
+                    <p class="text-[11px] text-emerald-500/80 mt-0.5">Ready to fire</p>
+                </div>
+                <div class="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-lg">&bull;</div>
+            </div>
+
+            <!-- Card 3: Paused Jobs -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Paused Jobs</p>
+                    <p id="statPausedJobs" class="text-2xl font-bold text-amber-400 mt-1">0</p>
+                    <p class="text-[11px] text-amber-500/80 mt-0.5">Suspended</p>
+                </div>
+                <div class="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center text-sm">&#x23F8;</div>
+            </div>
+
+            <!-- Card 4: In Progress Executing -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">In Progress</p>
+                    <p id="statExecutingJobs" class="text-2xl font-bold text-cyan-400 mt-1">0</p>
+                    <p class="text-[11px] text-cyan-500/80 mt-0.5">Active worker threads</p>
+                </div>
+                <div id="executingIconContainer" class="w-10 h-10 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-sm">
+                    &#9654;
+                </div>
+            </div>
+
+            <!-- Card 5: Engine State -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between shadow-lg col-span-2 sm:col-span-1">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Engine State</p>
+                    <div class="flex items-center space-x-1.5 mt-1">
+                        <span id="healthPulseDot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 status-pulse"></span>
+                        <p id="statHealth" class="text-base font-bold text-emerald-400">RUNNING</p>
+                    </div>
+                    <p id="statNodeId" class="text-[10px] text-slate-500 truncate max-w-[120px]" title="Instance ID">Clustered</p>
+                </div>
+                <div class="w-10 h-10 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center text-xs font-mono font-bold">Q2.3</div>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs Bar -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <nav class="flex space-x-2" aria-label="Tabs">
+                <button onclick="setActiveTab('jobs')" id="tabBtn-jobs" class="tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 bg-blue-600 text-white shadow-md shadow-blue-600/20">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    <span>Jobs & Triggers</span>
+                    <span id="tabBadge-jobs" class="ml-1.5 px-1.5 py-0.2 rounded-full bg-blue-800 text-[10px] text-blue-200">0</span>
+                </button>
+                <button onclick="setActiveTab('executing')" id="tabBtn-executing" class="tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900">
+                    <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    <span>Currently Executing</span>
+                    <span id="tabBadge-executing" class="ml-1.5 px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-slate-400">0</span>
+                </button>
+                <button onclick="setActiveTab('history')" id="tabBtn-history" class="tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span>Execution History</span>
+                    <span id="tabBadge-history" class="ml-1.5 px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-slate-400">0</span>
+                </button>
+                <button onclick="setActiveTab('cluster')" id="tabBtn-cluster" class="tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900">
+                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                    <span>Cluster Topology</span>
+                </button>
+                <button onclick="setActiveTab('telemetry')" id="tabBtn-telemetry" class="tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900">
+                    <span class="w-2 h-2 rounded-full bg-blue-500 status-pulse"></span>
+                    <span>Live Telemetry</span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 1: JOBS & TRIGGERS VIEW -->
+        <!-- ======================================================== -->
+        <div id="tabContent-jobs" class="tab-content space-y-4">
+            <!-- Filter & Action Toolbar -->
+            <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                <div class="flex flex-wrap items-center gap-2.5 flex-1">
+                    <!-- Search Input -->
+                    <div class="relative flex-1 min-w-[220px]">
+                        <input id="searchInput" oninput="filterJobs()" type="text" placeholder="Search by name, group, or class..."
+                            class="w-full bg-slate-900 text-xs text-slate-100 placeholder-slate-500 rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500">
+                        <svg class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    </div>
+
+                    <!-- Group Filter Dropdown -->
+                    <select id="groupFilter" onchange="filterJobs()" class="bg-slate-900 text-xs text-slate-300 rounded-lg px-3 py-2 border border-slate-700 focus:outline-none">
+                        <option value="">All Groups</option>
+                    </select>
+
+                    <!-- State Filter Pills -->
+                    <div class="flex items-center bg-slate-900 rounded-lg p-1 border border-slate-700 text-xs space-x-1">
+                        <button onclick="setStateFilter('ALL')" id="filterState-ALL" class="state-pill px-2.5 py-1 rounded bg-blue-600 text-white font-semibold">All</button>
+                        <button onclick="setStateFilter('SCHEDULED')" id="filterState-SCHEDULED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Scheduled</button>
+                        <button onclick="setStateFilter('IN_PROGRESS')" id="filterState-IN_PROGRESS" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">In Progress</button>
+                        <button onclick="setStateFilter('PAUSED')" id="filterState-PAUSED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Paused</button>
+                        <button onclick="setStateFilter('COMPLETED')" id="filterState-COMPLETED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Completed</button>
+                    </div>
+
+                    <!-- View Switcher (Table vs Grid) -->
+                    <div class="flex items-center bg-slate-900 rounded-lg p-1 border border-slate-700 text-xs">
+                        <button onclick="setViewMode('table')" id="viewModeTable" title="Table View" class="p-1 rounded bg-slate-800 text-white">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                        </button>
+                        <button onclick="setViewMode('grid')" id="viewModeGrid" title="Card Grid View" class="p-1 rounded text-slate-400 hover:text-white">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cluster Global Controls -->
+                <div class="flex items-center space-x-2">
+                    <button onclick="globalPauseAll()" id="btnGlobalPause" class="role-admin px-3 py-2 text-xs font-medium bg-amber-600/20 text-amber-300 hover:bg-amber-600/30 border border-amber-600/30 rounded-lg transition" title="Globally pause all triggers across cluster">
+                        Pause All
+                    </button>
+                    <button onclick="globalResumeAll()" id="btnGlobalResume" class="role-admin px-3 py-2 text-xs font-medium bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-600/30 rounded-lg transition" title="Globally resume all triggers across cluster">
+                        Resume All
+                    </button>
+                    <button onclick="openCreateModal()" id="btnNewJob" class="role-admin px-3.5 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-500 rounded-lg shadow-md shadow-blue-600/25 transition flex items-center space-x-1.5">
+                        <span>+ Register New Job</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Table Container View -->
+            <div id="jobsTableView" class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950/70 border-b border-slate-800 uppercase text-slate-400 font-semibold tracking-wider text-[11px]">
+                            <tr>
+                                <th class="py-3 px-4">Job Key & Group</th>
+                                <th class="py-3 px-4">Implementation Class</th>
+                                <th class="py-3 px-4">Trigger Schedule</th>
+                                <th class="py-3 px-4">Next Fire Time</th>
+                                <th class="py-3 px-4">Job Status</th>
+                                <th class="py-3 px-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobsTableBody" class="divide-y divide-slate-800/60 font-sans">
+                            <tr>
+                                <td colspan="6" class="py-8 text-center text-slate-500">
+                                    Loading registered Quartz jobs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Card Grid Container View -->
+            <div id="jobsGridView" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 2: CURRENTLY EXECUTING VIEW -->
+        <!-- ======================================================== -->
+        <div id="tabContent-executing" class="tab-content hidden space-y-4">
+            <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-white">In-Flight Executing Jobs</h3>
+                    <p class="text-xs text-slate-400">Live active tasks currently executing on Quartz worker threads with real-time elapsed timers.</p>
+                </div>
+                <button onclick="fetchExecutingJobs()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition">
+                    Refresh
+                </button>
+            </div>
+
+            <div id="executingJobsContainer" class="space-y-3">
+                <div class="text-center py-12 bg-slate-900/40 rounded-xl border border-slate-800/80 text-slate-500 text-xs">
+                    No jobs are currently running on the worker threads.
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 3: EXECUTION HISTORY AUDIT LOG VIEW -->
+        <!-- ======================================================== -->
+        <div id="tabContent-history" class="tab-content hidden space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                <div>
+                    <h3 class="text-sm font-bold text-white">Job Execution History & Audit Log</h3>
+                    <p class="text-xs text-slate-400">Chronological history with exact microsecond durations, statuses, and MDC trace correlation IDs.</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="fetchExecutionHistory()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition">
+                        Refresh
+                    </button>
+                    <button onclick="clearExecutionHistory()" class="role-operator px-3 py-1.5 text-xs bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 rounded-lg border border-rose-800/40 transition">
+                        Clear History
+                    </button>
+                </div>
+            </div>
+
+            <!-- History Table -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950/70 border-b border-slate-800 uppercase text-slate-400 font-semibold tracking-wider text-[11px]">
+                            <tr>
+                                <th class="py-3 px-4">Status</th>
+                                <th class="py-3 px-4">Job Key</th>
+                                <th class="py-3 px-4">Trigger</th>
+                                <th class="py-3 px-4">Duration</th>
+                                <th class="py-3 px-4">Executed At</th>
+                                <th class="py-3 px-4">Trace Correlation ID</th>
+                                <th class="py-3 px-4 text-right">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y divide-slate-800/60 font-sans">
+                            <tr>
+                                <td colspan="7" class="py-8 text-center text-slate-500">
+                                    No historical executions recorded yet.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 4: CLUSTER & ENGINE TOPOLOGY VIEW -->
+        <!-- ======================================================== -->
+        <div id="tabContent-cluster" class="tab-content hidden space-y-6">
+            <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-white">Quartz Clustered Engine Architecture</h3>
+                    <p class="text-xs text-slate-400">Node topology, storage driver, thread pool capacities, and database cluster locks.</p>
+                </div>
+                <button onclick="fetchClusterMetadata()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition">
+                    Reload Metadata
+                </button>
+            </div>
+
+            <!-- Cluster Cards Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="clusterMetadataGrid">
+                <!-- Loaded dynamically via loadClusterTopology() -->
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 5: LIVE TELEMETRY STREAM (WEBSOCKET) -->
+        <!-- ======================================================== -->
+        <div id="tabContent-telemetry" class="tab-content hidden space-y-4">
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="px-4 py-3 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="w-2.5 h-2.5 rounded-full bg-blue-500 status-pulse"></span>
+                        <h3 class="text-sm font-bold text-white tracking-wide">Live Cluster Telemetry Stream</h3>
+                        <span class="text-[11px] font-mono text-slate-400">(WebSocket STOMP: <code class="text-blue-400">/topic/job-events</code>)</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span id="eventCountBadge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">0 events</span>
+                        <button onclick="clearEventFeed()" class="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition">
+                            Clear Feed
+                        </button>
+                    </div>
+                </div>
+                <div id="eventFeedContainer" class="p-3 max-h-[500px] overflow-y-auto space-y-2 font-mono text-xs divide-y divide-slate-800/40">
+                    <div id="emptyFeedNotice" class="text-slate-500 text-center py-12 font-sans text-xs">
+                        Listening for real-time scheduler events (executions, start, completion, schedule updates)...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ======================================================== -->
+    <!-- SLIDE-OVER DRAWER: JOB DEEP INSPECTOR -->
+    <!-- ======================================================== -->
+    <div id="jobInspectorDrawer" class="hidden fixed inset-0 z-50 overflow-hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeInspector()"></div>
+        <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
+            <div class="w-screen max-w-xl bg-slate-900 border-l border-slate-800 p-6 flex flex-col justify-between shadow-2xl overflow-y-auto space-y-6">
+                <!-- Drawer Header -->
+                <div class="flex items-start justify-between border-b border-slate-800 pb-4">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h2 id="inspectJobName" class="text-lg font-bold text-white font-mono">job-name</h2>
+                            <div id="inspectJobStateContainer"></div>
+                        </div>
+                        <p id="inspectJobGroup" class="text-xs text-slate-400 font-mono mt-0.5">group: notifications</p>
+                    </div>
+                    <button onclick="closeInspector()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 text-xl font-bold">&times;</button>
+                </div>
+
+                <!-- Drawer Content -->
+                <div class="space-y-5 text-xs">
+                    <!-- Policy & Meta Cards -->
+                    <div class="grid grid-cols-3 gap-2 text-center">
+                        <div class="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
+                            <p class="text-[10px] uppercase text-slate-400 font-semibold">Concurrency</p>
+                            <p id="inspectDisallowConcurrent" class="font-bold text-slate-200 mt-1">Disallowed</p>
+                        </div>
+                        <div class="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
+                            <p class="text-[10px] uppercase text-slate-400 font-semibold">Durability</p>
+                            <p id="inspectDurable" class="font-bold text-slate-200 mt-1">Durable</p>
+                        </div>
+                        <div class="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
+                            <p class="text-[10px] uppercase text-slate-400 font-semibold">Recovery</p>
+                            <p id="inspectRecovery" class="font-bold text-slate-200 mt-1">False</p>
+                        </div>
+                    </div>
+
+                    <!-- Implementation Class -->
+                    <div>
+                        <label class="block text-slate-400 font-semibold mb-1">Implementation Class</label>
+                        <div id="inspectJobClass" class="bg-slate-950 p-2.5 rounded-lg border border-slate-800 font-mono text-blue-400 break-all select-all">
+                            com.enterprise.quartz.sample.SampleEmailJob
+                        </div>
+                    </div>
+
+                    <!-- Description -->
+                    <div>
+                        <label class="block text-slate-400 font-semibold mb-1">Description</label>
+                        <div id="inspectDescription" class="bg-slate-950 p-2.5 rounded-lg border border-slate-800 text-slate-300">
+                            None provided
+                        </div>
+                    </div>
+
+                    <!-- Latest Execution Outcome -->
+                    <div id="inspectLatestExecutionContainer">
+                        <label class="block text-slate-400 font-semibold mb-1">Last Execution Telemetry</label>
+                        <div id="inspectLatestExecutionBox" class="bg-slate-950 p-2.5 rounded-lg border border-slate-800 text-slate-300 font-mono text-[11px]">
+                            No previous runs recorded.
+                        </div>
+                    </div>
+
+                    <!-- Trigger Details -->
+                    <div>
+                        <label class="block text-slate-400 font-semibold mb-1">Attached Triggers & Schedule</label>
+                        <div id="inspectTriggersList" class="space-y-2">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Job Data Map -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-slate-400 font-semibold">Job Data Map (Parameters)</label>
+                            <button onclick="copyJobDataJson()" class="text-[11px] text-blue-400 hover:text-blue-300">Copy JSON</button>
+                        </div>
+                        <pre id="inspectJobDataJson" class="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] text-emerald-400 max-h-40 overflow-y-auto">{}</pre>
+                    </div>
+                </div>
+
+                <!-- Drawer Actions Footer -->
+                <div class="border-t border-slate-800 pt-4 flex items-center justify-between">
+                    <div class="space-x-1.5">
+                        <button id="inspectBtnTrigger" onclick="openTriggerModalFromInspector()" class="role-operator px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-md shadow-blue-600/30">
+                            Trigger Now
+                        </button>
+                        <button id="inspectBtnPauseResume" onclick="togglePauseFromInspector()" class="role-operator px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs border border-slate-700">
+                            Pause / Resume
+                        </button>
+                    </div>
+                    <button id="inspectBtnDelete" onclick="deleteFromInspector()" class="role-admin px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800">
+                        Delete Job
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- MODAL: TRIGGER JOB WITH CUSTOM JOB DATA -->
+    <!-- ======================================================== -->
+    <div id="triggerJobModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-base font-bold text-white">Trigger Immediate Execution</h3>
+                <button onclick="closeModal('triggerJobModal')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            <form onsubmit="handleTriggerWithData(event)" class="space-y-3.5 text-xs">
+                <input type="hidden" id="triggerModalGroup">
+                <input type="hidden" id="triggerModalName">
+                <div class="text-slate-300 font-medium">
+                    Target Job: <span id="triggerModalTargetLabel" class="text-blue-400 font-mono"></span>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">Optional Ad-Hoc Execution Parameters (JSON)</label>
+                    <textarea id="triggerModalCustomData" rows="4" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs" placeholder='{"overrideRecipient":"audit@enterprise.com"}'></textarea>
+                    <p class="text-[10px] text-slate-500 mt-1">Parameters merged with default JobDataMap for this single execution run.</p>
+                </div>
+                <div class="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('triggerJobModal')" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-500 shadow-md shadow-blue-600/30">Fire Now</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- MODAL: REGISTER NEW JOB -->
+    <!-- ======================================================== -->
+    <div id="createJobModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-base font-bold text-white">Register New Quartz Job</h3>
+                <button onclick="closeModal('createJobModal')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            <form id="createJobForm" onsubmit="handleCreateJob(event)" class="space-y-3.5 text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1 font-medium">Job Name *</label>
+                        <input id="createJobName" required placeholder="e.g. data-sync-job" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1 font-medium">Job Group *</label>
+                        <input id="createJobGroup" required placeholder="e.g. maintenance" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">Implementation Class *</label>
+                    <select id="createJobClassSelect" onchange="handleClassPreset(this.value)" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                        <option value="com.enterprise.quartz.sample.SampleEmailJob">SampleEmailJob (com.enterprise.quartz.sample.SampleEmailJob)</option>
+                        <option value="com.enterprise.quartz.sample.SampleDataCleanupJob">SampleDataCleanupJob (com.enterprise.quartz.sample.SampleDataCleanupJob)</option>
+                        <option value="custom">-- Custom FQCN --</option>
+                    </select>
+                    <input id="createCustomClass" placeholder="Enter full class name" class="hidden mt-2 w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">Description</label>
+                    <input id="createDescription" placeholder="Optional human readable description" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                </div>
+
+                <!-- Schedule Section -->
+                <div class="space-y-2 border border-slate-800 p-3 rounded-xl bg-slate-950/40">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-400 mb-1 font-medium">Trigger Strategy *</label>
+                            <select id="createTriggerType" onchange="toggleTriggerInputs(this.value)" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                                <option value="CRON">CRON Expression</option>
+                                <option value="SIMPLE_INTERVAL">Fixed Interval</option>
+                                <option value="ONE_TIME">One-Time Immediate</option>
+                            </select>
+                        </div>
+                        <div id="cronPresetGroup">
+                            <label class="block text-slate-400 mb-1 font-medium">Cron Presets</label>
+                            <select id="createCronPreset" onchange="applyCronPreset(this.value)" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                                <option value="custom">Custom Expression</option>
+                                <option value="0 * * * * ?">Every Minute (0 * * * * ?)</option>
+                                <option value="0 0/5 * * * ?">Every 5 Minutes (0 0/5 * * * ?)</option>
+                                <option value="0 0/15 * * * ?" selected>Every 15 Minutes (0 0/15 * * * ?)</option>
+                                <option value="0 0 * * * ?">Hourly at :00 (0 0 * * * ?)</option>
+                                <option value="0 0 0 * * ?">Daily at Midnight (0 0 0 * * ?)</option>
+                                <option value="0 0 8 * * ?">Daily at 8:00 AM (0 0 8 * * ?)</option>
+                                <option value="0 0 9 ? * MON-FRI">Weekdays at 9:00 AM (0 0 9 ? * MON-FRI)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="cronInputGroup">
+                        <label class="block text-slate-400 mb-1 font-medium">Quartz Cron Expression</label>
+                        <input id="createCronExpr" oninput="updateCronExplanation(this.value)" placeholder="0 0/15 * * * ?" value="0 0/15 * * * ?" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-mono">
+                        <p id="cronExplanationText" class="text-[11px] text-blue-400 mt-1 font-sans">Every 15 minutes past every hour.</p>
+                    </div>
+                    <div id="intervalInputGroup" class="hidden">
+                        <label class="block text-slate-400 mb-1 font-medium">Interval in Seconds</label>
+                        <input id="createIntervalSecs" type="number" placeholder="300" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">Job Data Map (JSON format)</label>
+                    <textarea id="createJobDataJson" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-mono text-xs" placeholder='{"recipient":"admin@enterprise.com"}'></textarea>
+                </div>
+
+                <div class="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('createJobModal')" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-500 shadow-md shadow-blue-600/30">Schedule Job</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- MODAL: RESCHEDULE JOB TRIGGER -->
+    <!-- ======================================================== -->
+    <div id="rescheduleModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-base font-bold text-white">Reschedule Job Trigger</h3>
+                <button onclick="closeModal('rescheduleModal')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            <form id="rescheduleForm" onsubmit="handleReschedule(event)" class="space-y-3.5 text-xs">
+                <input type="hidden" id="rescheduleGroup">
+                <input type="hidden" id="rescheduleName">
+                <div class="text-slate-300 font-medium">
+                    Job: <span id="rescheduleTargetLabel" class="text-blue-400 font-mono"></span>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">Trigger Strategy</label>
+                    <select id="rescheduleTriggerType" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                        <option value="CRON">CRON Expression</option>
+                        <option value="SIMPLE_INTERVAL">Fixed Interval</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">Cron Presets</label>
+                    <select onchange="document.getElementById('rescheduleCronExpr').value = this.value" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                        <option value="0 * * * * ?">Every Minute (0 * * * * ?)</option>
+                        <option value="0 0/5 * * * ?">Every 5 Minutes (0 0/5 * * * ?)</option>
+                        <option value="0 0/15 * * * ?" selected>Every 15 Minutes (0 0/15 * * * ?)</option>
+                        <option value="0 0 * * * ?">Hourly at :00 (0 0 * * * ?)</option>
+                        <option value="0 0 0 * * ?">Daily at Midnight (0 0 0 * * ?)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1 font-medium">New Cron Expression</label>
+                    <input id="rescheduleCronExpr" placeholder="0 0/30 * * * ?" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-mono">
+                </div>
+                <div class="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('rescheduleModal')" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-500">Save Schedule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+    <!-- ======================================================== -->
+    <!-- JAVASCRIPT CONTROLLER -->
+    <!-- ======================================================== -->
+    <script>
+        // State
+        let allJobs = [];
+        let executingJobs = [];
+        let executionHistory = [];
+        let clusterMetadata = null;
+        let activeTab = 'jobs';
+        let currentStateFilter = 'ALL';
+        let viewMode = 'table';
+        let autoRefreshTimer = null;
+        let elapsedIntervalTimer = null;
+        let stompClient = null;
+        let eventCounter = 0;
+        let currentInspectedJob = null;
+
+        const users = {
+            admin: { user: 'admin', pass: 'admin123', role: 'ROLE_ADMIN' },
+            operator: { user: 'operator', pass: 'operator123', role: 'ROLE_OPERATOR' },
+            viewer: { user: 'viewer', pass: 'viewer123', role: 'ROLE_VIEWER' }
+        };
+        let currentAuth = users.admin;
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchJobs();
+            fetchClusterMetadata();
+            fetchExecutingJobs();
+            fetchExecutionHistory();
+            toggleAutoRefresh(15000);
+            updateRoleUI();
+            connectWebSocket();
+
+            // Setup 1s timer to increment elapsed seconds on executing jobs
+            elapsedIntervalTimer = setInterval(renderExecutingTimer, 1000);
+        });
+
+        function getAuthHeader() {
+            return 'Basic ' + btoa(`${currentAuth.user}:${currentAuth.pass}`);
+        }
+
+        function switchRole(selected) {
+            currentAuth = users[selected] || users.admin;
+            showToast(`Switched active identity to ${currentAuth.user} (${currentAuth.role})`, 'info');
+            updateRoleUI();
+            refreshCurrentTab();
+        }
+
+        function updateRoleUI() {
+            const isAdmin = currentAuth.role === 'ROLE_ADMIN';
+            const isOperator = currentAuth.role === 'ROLE_OPERATOR' || isAdmin;
+
+            document.querySelectorAll('.role-admin').forEach(el => {
+                el.style.opacity = isAdmin ? '1' : '0.4';
+                el.style.pointerEvents = isAdmin ? 'auto' : 'none';
+            });
+            document.querySelectorAll('.role-operator').forEach(el => {
+                el.style.opacity = isOperator ? '1' : '0.4';
+                el.style.pointerEvents = isOperator ? 'auto' : 'none';
+            });
+        }
+
+        // ==========================================
+        // TAB MANAGEMENT
+        // ==========================================
+        function setActiveTab(tab) {
+            activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.className = 'tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900';
+            });
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+
+            const activeBtn = document.getElementById(`tabBtn-${tab}`);
+            if (activeBtn) {
+                activeBtn.className = 'tab-btn px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-2 bg-blue-600 text-white shadow-md shadow-blue-600/20';
+            }
+
+            const activeContent = document.getElementById(`tabContent-${tab}`);
+            if (activeContent) activeContent.classList.remove('hidden');
+
+            refreshCurrentTab();
+        }
+
+        function refreshCurrentTab() {
+            if (activeTab === 'jobs') fetchJobs();
+            else if (activeTab === 'executing') fetchExecutingJobs();
+            else if (activeTab === 'history') fetchExecutionHistory();
+            else if (activeTab === 'cluster') fetchClusterMetadata();
+        }
+
+        // ==========================================
+        // JOB STATUS BADGE RENDERING
+        // (In Progress, Scheduled, Paused, Completed, Failed, Deleted)
+        // ==========================================
+        function renderJobStatusBadge(job) {
+            const status = job.jobStatus || (job.currentlyExecuting ? 'IN_PROGRESS' : 'SCHEDULED');
+            
+            let color = 'bg-slate-800 text-slate-400 border-slate-700';
+            let icon = '&bull;';
+            let label = status;
+
+            if (status === 'IN_PROGRESS' || status === 'STARTED') {
+                color = 'bg-blue-500/20 text-blue-300 border-blue-500/40 status-pulse';
+                icon = '<span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>';
+                label = 'IN PROGRESS';
+            } else if (status === 'SCHEDULED' || status === 'NORMAL' || status === 'WAITING') {
+                color = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                icon = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>';
+                label = 'SCHEDULED';
+            } else if (status === 'PAUSED') {
+                color = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                icon = '&#x23F8;';
+                label = 'PAUSED';
+            } else if (status === 'COMPLETED' || status === 'COMPLETE') {
+                color = 'bg-teal-500/10 text-teal-400 border-teal-500/20';
+                icon = '&#10003;';
+                label = 'COMPLETED';
+            } else if (status === 'FAILED' || status === 'ERROR') {
+                color = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                icon = '&#10007;';
+                label = 'FAILED';
+            } else if (status === 'BLOCKED') {
+                color = 'bg-purple-500/10 text-purple-400 border-purple-500/20';
+                icon = '&bull;';
+                label = 'BLOCKED';
+            } else if (status === 'DELETED') {
+                color = 'bg-slate-800 text-slate-500 border-slate-700 line-through';
+                icon = '&times;';
+                label = 'DELETED';
+            }
+
+            let lastRunHtml = '';
+            if (job.lastExecutionStatus) {
+                const lastColor = job.lastExecutionStatus === 'SUCCESS' ? 'text-emerald-400' : 'text-rose-400';
+                const dur = job.lastExecutionDurationMs != null ? ` (${job.lastExecutionDurationMs}ms)` : '';
+                lastRunHtml = `<div class="text-[10px] text-slate-500 font-mono mt-0.5">Last run: <span class="${lastColor} font-semibold">${job.lastExecutionStatus}</span>${dur}</div>`;
+            }
+
+            return `
+                <div>
+                    <span class="status-cell-badge inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${color}">
+                        <span>${icon}</span>
+                        <span>${label}</span>
+                    </span>
+                    ${lastRunHtml}
+                </div>
+            `;
+        }
+
+        // ==========================================
+        // REAL-TIME WEBSOCKET (STOMP / SOCKJS)
+        // ==========================================
+        function connectWebSocket() {
+            const dot = document.getElementById('wsStatusDot');
+            const text = document.getElementById('wsStatusText');
+            dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 status-pulse';
+            text.innerText = 'Connecting...';
+
+            try {
+                const socket = new SockJS('/ws-quartz');
+                stompClient = Stomp.over(socket);
+                stompClient.debug = null; // Suppress verbose console spam
+
+                stompClient.connect({}, function (frame) {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+                    text.innerText = 'Live Stream Active';
+                    text.className = 'text-emerald-400 font-mono text-[11px]';
+
+                    stompClient.subscribe('/topic/job-events', function (messageOutput) {
+                        try {
+                            const event = JSON.parse(messageOutput.body);
+                            handleLiveJobEvent(event);
+                        } catch (err) {
+                            console.error('Failed to parse WebSocket event:', err);
+                        }
+                    });
+                }, function (error) {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+                    text.innerText = 'WS Disconnected';
+                    text.className = 'text-rose-400 font-mono text-[11px]';
+                    setTimeout(connectWebSocket, 5000);
+                });
+            } catch (err) {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+                text.innerText = 'WS Error';
+                text.className = 'text-rose-400 font-mono text-[11px]';
+                setTimeout(connectWebSocket, 5000);
+            }
+        }
+
+        function handleLiveJobEvent(event) {
+            eventCounter++;
+            document.getElementById('eventCountBadge').innerText = `${eventCounter} events`;
+
+            const emptyNotice = document.getElementById('emptyFeedNotice');
+            if (emptyNotice) emptyNotice.remove();
+
+            // Prepend to Live Telemetry Feed
+            const feedContainer = document.getElementById('eventFeedContainer');
+            const item = document.createElement('div');
+            item.className = 'pt-2 pb-1.5 flex flex-col sm:flex-row sm:items-center justify-between text-[11px] hover:bg-slate-800/40 px-2 rounded transition';
+
+            let typeBadge = 'bg-slate-800 text-slate-300 border-slate-700';
+            let icon = '&bull;';
+            if (event.eventType === 'JOB_STARTED') {
+                typeBadge = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                icon = '&#9654;';
+            } else if (event.eventType === 'JOB_COMPLETED') {
+                typeBadge = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                icon = '&#10003;';
+            } else if (event.eventType === 'JOB_FAILED') {
+                typeBadge = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                icon = '&#10007;';
+            } else if (event.eventType === 'JOB_PAUSED') {
+                typeBadge = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                icon = '&#x23F8;';
+            } else if (event.eventType === 'JOB_RESUMED') {
+                typeBadge = 'bg-teal-500/10 text-teal-400 border-teal-500/20';
+                icon = '&#9654;';
+            }
+
+            const timeStr = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            const durationTag = event.durationMs != null ? `<span class="ml-1.5 text-emerald-400 font-semibold font-mono">[${event.durationMs}ms]</span>` : '';
+            const corrTag = event.correlationId ? `<span class="ml-1.5 text-slate-500 text-[10px]" title="Correlation ID">${event.correlationId.substring(0, 8)}...</span>` : '';
+
+            item.innerHTML = `
+                <div class="flex items-center space-x-2">
+                    <span class="text-slate-500 text-[10px]">${timeStr}</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeBadge}">
+                        ${icon} ${event.eventType}
+                    </span>
+                    <span class="font-bold text-white">${event.jobGroup}.${event.jobName}</span>
+                    ${durationTag}
+                    ${corrTag}
+                </div>
+                <div class="text-slate-400 text-[11px] sm:text-right mt-1 sm:mt-0 font-sans">
+                    ${event.message || ''}
+                </div>
+            `;
+            feedContainer.insertBefore(item, feedContainer.firstChild);
+
+            // Reactive Job Status Updates
+            const targetJob = allJobs.find(j => j.jobGroup === event.jobGroup && j.jobName === event.jobName);
+
+            if (event.eventType === 'JOB_STARTED') {
+                showToast(`🚀 [STARTED] ${event.jobGroup}.${event.jobName} is in progress`, 'info');
+                if (targetJob) {
+                    targetJob.jobStatus = 'IN_PROGRESS';
+                    targetJob.currentlyExecuting = true;
+                    updateJobRowStatus(targetJob);
+                }
+                fetchExecutingJobs();
+            } else if (event.eventType === 'JOB_COMPLETED') {
+                showToast(`✅ [COMPLETED] ${event.jobGroup}.${event.jobName} finished in ${event.durationMs}ms`, 'success');
+                if (targetJob) {
+                    targetJob.currentlyExecuting = false;
+                    targetJob.jobStatus = 'SCHEDULED';
+                    targetJob.lastExecutionStatus = 'SUCCESS';
+                    targetJob.lastExecutionDurationMs = event.durationMs;
+                    targetJob.lastExecutionTime = new Date().toISOString();
+                    updateJobRowStatus(targetJob);
+                }
+                fetchExecutingJobs();
+                fetchExecutionHistory();
+                setTimeout(fetchJobs, 600);
+            } else if (event.eventType === 'JOB_FAILED') {
+                showToast(`❌ [FAILED] ${event.jobGroup}.${event.jobName}: ${event.message}`, 'error');
+                if (targetJob) {
+                    targetJob.currentlyExecuting = false;
+                    targetJob.jobStatus = 'FAILED';
+                    targetJob.lastExecutionStatus = 'FAILED';
+                    targetJob.lastExecutionTime = new Date().toISOString();
+                    updateJobRowStatus(targetJob);
+                }
+                fetchExecutingJobs();
+                fetchExecutionHistory();
+                setTimeout(fetchJobs, 600);
+            } else if (event.eventType === 'JOB_PAUSED') {
+                if (targetJob) {
+                    targetJob.jobStatus = 'PAUSED';
+                    updateJobRowStatus(targetJob);
+                }
+                setTimeout(fetchJobs, 400);
+            } else if (event.eventType === 'JOB_RESUMED') {
+                if (targetJob) {
+                    targetJob.jobStatus = 'SCHEDULED';
+                    updateJobRowStatus(targetJob);
+                }
+                setTimeout(fetchJobs, 400);
+            } else if (event.eventType === 'JOB_DELETED') {
+                if (targetJob) {
+                    targetJob.jobStatus = 'DELETED';
+                    updateJobRowStatus(targetJob);
+                }
+                setTimeout(fetchJobs, 500);
+            } else {
+                fetchJobs();
+            }
+        }
+
+        function updateJobRowStatus(job) {
+            const rowId = `job-row-${job.jobGroup}-${job.jobName}`;
+            const row = document.getElementById(rowId);
+            if (row) {
+                row.classList.add('row-highlight');
+                const container = row.querySelector('.status-cell-container');
+                if (container) {
+                    container.innerHTML = renderJobStatusBadge(job);
+                }
+                setTimeout(() => row.classList.remove('row-highlight'), 2000);
+            }
+        }
+
+        function clearEventFeed() {
+            document.getElementById('eventFeedContainer').innerHTML = '<div id="emptyFeedNotice" class="text-slate-500 text-center py-12 font-sans text-xs">Listening for real-time scheduler events...</div>';
+            eventCounter = 0;
+            document.getElementById('eventCountBadge').innerText = '0 events';
+        }
+
+        // ==========================================
+        // REST API: FETCH ALL JOBS
+        // ==========================================
+        async function fetchJobs() {
+            try {
+                const response = await fetch('/api/v1/jobs', {
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+
+                if (response.status === 401 || response.status === 403) {
+                    showToast('Authentication failure or unauthorized for this endpoint', 'error');
+                    return;
+                }
+
+                if (!response.ok) throw new Error('Failed to fetch jobs');
+                allJobs = await response.json();
+                populateGroupFilter(allJobs);
+                renderJobs(filterJobList(allJobs));
+                updateStats(allJobs);
+            } catch (err) {
+                console.error(err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        function populateGroupFilter(jobs) {
+            const select = document.getElementById('groupFilter');
+            const currentVal = select.value;
+            const groups = [...new Set(jobs.map(j => j.jobGroup))];
+
+            select.innerHTML = '<option value="">All Groups</option>' +
+                groups.map(g => `<option value="${g}">${g}</option>`).join('');
+            select.value = currentVal;
+        }
+
+        function setStateFilter(state) {
+            currentStateFilter = state;
+            document.querySelectorAll('.state-pill').forEach(btn => {
+                btn.className = 'state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white';
+            });
+            document.getElementById(`filterState-${state}`).className = 'state-pill px-2.5 py-1 rounded bg-blue-600 text-white font-semibold';
+            renderJobs(filterJobList(allJobs));
+        }
+
+        function setViewMode(mode) {
+            viewMode = mode;
+            document.getElementById('jobsTableView').classList.toggle('hidden', mode !== 'table');
+            document.getElementById('jobsGridView').classList.toggle('hidden', mode !== 'grid');
+            document.getElementById('viewModeTable').className = mode === 'table' ? 'p-1 rounded bg-slate-800 text-white' : 'p-1 rounded text-slate-400 hover:text-white';
+            document.getElementById('viewModeGrid').className = mode === 'grid' ? 'p-1 rounded bg-slate-800 text-white' : 'p-1 rounded text-slate-400 hover:text-white';
+            renderJobs(filterJobList(allJobs));
+        }
+
+        function filterJobList(jobs) {
+            const query = (document.getElementById('searchInput').value || '').toLowerCase();
+            const selectedGroup = document.getElementById('groupFilter').value;
+
+            return jobs.filter(j => {
+                const matchesQuery = j.jobName.toLowerCase().includes(query) ||
+                                     j.jobGroup.toLowerCase().includes(query) ||
+                                     j.jobClass.toLowerCase().includes(query);
+                const matchesGroup = !selectedGroup || j.jobGroup === selectedGroup;
+
+                let matchesState = true;
+                const status = j.jobStatus || (j.currentlyExecuting ? 'IN_PROGRESS' : 'SCHEDULED');
+
+                if (currentStateFilter === 'SCHEDULED') matchesState = status === 'SCHEDULED';
+                else if (currentStateFilter === 'IN_PROGRESS') matchesState = status === 'IN_PROGRESS' || j.currentlyExecuting;
+                else if (currentStateFilter === 'PAUSED') matchesState = status === 'PAUSED';
+                else if (currentStateFilter === 'COMPLETED') matchesState = status === 'COMPLETED';
+
+                return matchesQuery && matchesGroup && matchesState;
+            });
+        }
+
+        function filterJobs() {
+            renderJobs(filterJobList(allJobs));
+        }
+
+        function renderJobs(jobs) {
+            if (viewMode === 'table') renderTableView(jobs);
+            else renderGridView(jobs);
+        }
+
+        function renderTableView(jobs) {
+            const tbody = document.getElementById('jobsTableBody');
+            if (!jobs || jobs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-500">No matching Quartz jobs found in cluster.</td></tr>`;
+                return;
+            }
+
+            const isAdmin = currentAuth.role === 'ROLE_ADMIN';
+            const isOperator = currentAuth.role === 'ROLE_OPERATOR' || isAdmin;
+
+            tbody.innerHTML = jobs.map(job => {
+                const primaryTrigger = job.triggers && job.triggers.length > 0 ? job.triggers[0] : null;
+                const nextFire = primaryTrigger && primaryTrigger.nextFireTime 
+                    ? new Date(primaryTrigger.nextFireTime).toLocaleString() 
+                    : '<span class="text-slate-600">--</span>';
+                const cronOrInterval = primaryTrigger && primaryTrigger.cronExpression 
+                    ? `<span class="font-mono text-blue-400">${primaryTrigger.cronExpression}</span>`
+                    : (primaryTrigger ? primaryTrigger.type : 'N/A');
+
+                const simpleClass = job.jobClass.split('.').pop();
+                const rowId = `job-row-${job.jobGroup}-${job.jobName}`;
+                const isPaused = job.jobStatus === 'PAUSED';
+
+                return `
+                <tr id="${rowId}" class="hover:bg-slate-900/60 transition group cursor-pointer" onclick="openInspector('${job.jobGroup}', '${job.jobName}')">
+                    <td class="py-3 px-4">
+                        <div class="font-bold text-white group-hover:text-blue-400 transition">${job.jobName}</div>
+                        <div class="text-[11px] text-slate-500 font-mono">group: ${job.jobGroup}</div>
+                    </td>
+                    <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px] border border-slate-700/80" title="${job.jobClass}">
+                            ${simpleClass}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 text-xs font-mono">
+                        ${cronOrInterval}
+                    </td>
+                    <td class="py-3 px-4 text-xs text-slate-400">
+                        ${nextFire}
+                    </td>
+                    <td class="py-3 px-4 status-cell-container">
+                        ${renderJobStatusBadge(job)}
+                    </td>
+                    <td class="py-3 px-4 text-right space-x-1" onclick="event.stopPropagation()">
+                        <!-- Quick Trigger Button -->
+                        <button onclick="openTriggerModal('${job.jobGroup}', '${job.jobName}')" 
+                            class="role-operator px-2 py-1 text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-blue-300 hover:text-white rounded border border-slate-700 transition" 
+                            title="Trigger execution" ${!isOperator ? 'disabled' : ''}>
+                            Trigger
+                        </button>
+
+                        <!-- Pause / Resume Button -->
+                        ${isPaused ? `
+                            <button onclick="resumeJob('${job.jobGroup}', '${job.jobName}')" 
+                                class="role-operator px-2 py-1 text-[11px] font-medium bg-emerald-950/40 hover:bg-emerald-800/60 text-emerald-300 rounded border border-emerald-700/40 transition" 
+                                ${!isOperator ? 'disabled' : ''}>
+                                Resume
+                            </button>
+                        ` : `
+                            <button onclick="pauseJob('${job.jobGroup}', '${job.jobName}')" 
+                                class="role-operator px-2 py-1 text-[11px] font-medium bg-amber-950/40 hover:bg-amber-800/60 text-amber-300 rounded border border-amber-700/40 transition" 
+                                ${!isOperator ? 'disabled' : ''}>
+                                Pause
+                            </button>
+                        `}
+
+                        <!-- Reschedule Button -->
+                        <button onclick="openRescheduleModal('${job.jobGroup}', '${job.jobName}', '${primaryTrigger ? (primaryTrigger.cronExpression || '') : ''}')" 
+                            class="role-admin px-2 py-1 text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition" 
+                            ${!isAdmin ? 'disabled' : ''}>
+                            Edit
+                        </button>
+
+                        <!-- Delete Button -->
+                        <button onclick="deleteJob('${job.jobGroup}', '${job.jobName}')" 
+                            class="role-admin px-2 py-1 text-[11px] font-medium bg-rose-950/40 hover:bg-rose-800/60 text-rose-300 rounded border border-rose-700/40 transition" 
+                            ${!isAdmin ? 'disabled' : ''}>
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        function renderGridView(jobs) {
+            const grid = document.getElementById('jobsGridView');
+            if (!jobs || jobs.length === 0) {
+                grid.innerHTML = '<div class="col-span-3 text-center py-12 text-slate-500 text-xs">No matching jobs found.</div>';
+                return;
+            }
+
+            const isAdmin = currentAuth.role === 'ROLE_ADMIN';
+            const isOperator = currentAuth.role === 'ROLE_OPERATOR' || isAdmin;
+
+            grid.innerHTML = jobs.map(job => {
+                const primaryTrigger = job.triggers && job.triggers.length > 0 ? job.triggers[0] : null;
+                const nextFire = primaryTrigger && primaryTrigger.nextFireTime 
+                    ? new Date(primaryTrigger.nextFireTime).toLocaleString() 
+                    : '--';
+                const cronOrInterval = primaryTrigger && primaryTrigger.cronExpression 
+                    ? primaryTrigger.cronExpression : (primaryTrigger ? primaryTrigger.type : 'N/A');
+                const isPaused = job.jobStatus === 'PAUSED';
+
+                return `
+                <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-lg hover:border-slate-700 transition space-y-3 cursor-pointer" onclick="openInspector('${job.jobGroup}', '${job.jobName}')">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <h4 class="font-bold text-white text-sm hover:text-blue-400 transition">${job.jobName}</h4>
+                            <span class="text-[11px] font-mono text-slate-500">group: ${job.jobGroup}</span>
+                        </div>
+                        <div>${renderJobStatusBadge(job)}</div>
+                    </div>
+
+                    <div class="space-y-1.5 text-xs text-slate-400 border-t border-b border-slate-800/80 py-2.5">
+                        <div class="flex justify-between">
+                            <span>Schedule:</span>
+                            <span class="font-mono text-blue-400">${cronOrInterval}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Next Run:</span>
+                            <span>${nextFire}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Job Class:</span>
+                            <span class="font-mono truncate max-w-[150px]" title="${job.jobClass}">${job.jobClass.split('.').pop()}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-end space-x-1.5 pt-1" onclick="event.stopPropagation()">
+                        <button onclick="openTriggerModal('${job.jobGroup}', '${job.jobName}')" class="role-operator px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 rounded text-xs transition">Trigger</button>
+                        ${isPaused ? `
+                            <button onclick="resumeJob('${job.jobGroup}', '${job.jobName}')" class="role-operator px-2.5 py-1 bg-emerald-950/40 text-emerald-300 rounded text-xs">Resume</button>
+                        ` : `
+                            <button onclick="pauseJob('${job.jobGroup}', '${job.jobName}')" class="role-operator px-2.5 py-1 bg-amber-950/40 text-amber-300 rounded text-xs">Pause</button>
+                        `}
+                        <button onclick="openRescheduleModal('${job.jobGroup}', '${job.jobName}', '${primaryTrigger ? (primaryTrigger.cronExpression || '') : ''}')" class="role-admin px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs">Edit</button>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function updateStats(jobs) {
+            document.getElementById('statTotalJobs').innerText = jobs.length;
+            document.getElementById('tabBadge-jobs').innerText = jobs.length;
+
+            const groups = new Set(jobs.map(j => j.jobGroup));
+            document.getElementById('statGroupCount').innerText = `${groups.size} groups`;
+
+            const scheduled = jobs.filter(j => j.jobStatus === 'SCHEDULED' || (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'NORMAL'))).length;
+            const paused = jobs.filter(j => j.jobStatus === 'PAUSED' || (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'PAUSED'))).length;
+            const inProgress = jobs.filter(j => j.jobStatus === 'IN_PROGRESS' || j.currentlyExecuting).length;
+
+            document.getElementById('statActiveJobs').innerText = scheduled;
+            document.getElementById('statPausedJobs').innerText = paused;
+            document.getElementById('statExecutingJobs').innerText = inProgress;
+        }
+
+        // ==========================================
+        // REST API: CURRENTLY EXECUTING JOBS
+        // ==========================================
+        async function fetchExecutingJobs() {
+            try {
+                const res = await fetch('/api/v1/jobs/executing', {
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) return;
+                executingJobs = await res.json();
+                renderExecutingJobs(executingJobs);
+            } catch (err) {
+                console.error('Failed to fetch executing jobs:', err);
+            }
+        }
+
+        function renderExecutingJobs(jobs) {
+            const count = jobs.length;
+            document.getElementById('statExecutingJobs').innerText = count;
+            document.getElementById('tabBadge-executing').innerText = count;
+
+            const iconContainer = document.getElementById('executingIconContainer');
+            if (count > 0) {
+                iconContainer.className = 'w-10 h-10 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm status-pulse font-bold';
+            } else {
+                iconContainer.className = 'w-10 h-10 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-sm';
+            }
+
+            const container = document.getElementById('executingJobsContainer');
+            if (count === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 bg-slate-900/40 rounded-xl border border-slate-800/80 text-slate-500 text-xs">
+                        No jobs are currently running on the worker threads.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = jobs.map(j => {
+                const fireTime = j.fireTime ? new Date(j.fireTime).toLocaleTimeString() : '--';
+                return `
+                <div class="bg-slate-900 border border-blue-500/40 rounded-xl p-4 shadow-lg space-y-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-blue-400 status-pulse"></span>
+                            <span class="font-bold text-white text-sm">${j.jobGroup}.${j.jobName}</span>
+                            <span class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">IN PROGRESS</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-xs text-slate-400">Elapsed: </span>
+                            <span class="text-sm font-bold font-mono text-emerald-400 elapsed-timer" data-start="${j.fireTime || new Date().toISOString()}">0s</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                        <div>Trigger: <span class="font-mono text-slate-200">${j.triggerName}</span></div>
+                        <div>Fired At: <span class="font-mono text-slate-200">${fireTime}</span></div>
+                        <div>Refire Count: <span class="font-mono text-slate-200">${j.refireCount}</span></div>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function renderExecutingTimer() {
+            document.querySelectorAll('.elapsed-timer').forEach(el => {
+                const startStr = el.getAttribute('data-start');
+                if (startStr) {
+                    const elapsedMs = Date.now() - new Date(startStr).getTime();
+                    const secs = Math.max(0, Math.floor(elapsedMs / 1000));
+                    el.innerText = `${secs}s`;
+                }
+            });
+        }
+
+        // ==========================================
+        // REST API: EXECUTION HISTORY AUDIT LOG
+        // ==========================================
+        async function fetchExecutionHistory() {
+            try {
+                const res = await fetch('/api/v1/jobs/history?limit=100', {
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) return;
+                executionHistory = await res.json();
+                renderExecutionHistory(executionHistory);
+            } catch (err) {
+                console.error('Failed to fetch history:', err);
+            }
+        }
+
+        function renderExecutionHistory(records) {
+            document.getElementById('tabBadge-history').innerText = records.length;
+            const tbody = document.getElementById('historyTableBody');
+            if (!records || records.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">No execution audit history records yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = records.map(r => {
+                const isSuccess = r.status === 'SUCCESS';
+                const statusBadge = isSuccess
+                    ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">&#10003; COMPLETED</span>'
+                    : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">&#10007; FAILED</span>';
+
+                const timeStr = r.endTime ? new Date(r.endTime).toLocaleTimeString() : '--';
+                const duration = r.durationMs != null ? `<span class="font-mono text-emerald-400">${r.durationMs}ms</span>` : '--';
+                const corrIdShort = r.correlationId ? r.correlationId.substring(0, 8) + '...' : 'SYSTEM';
+
+                return `
+                <tr class="hover:bg-slate-900/60 transition">
+                    <td class="py-2.5 px-4">${statusBadge}</td>
+                    <td class="py-2.5 px-4 font-mono font-bold text-white">${r.jobGroup}.${r.jobName}</td>
+                    <td class="py-2.5 px-4 font-mono text-slate-400 text-[11px]">${r.triggerName || '--'}</td>
+                    <td class="py-2.5 px-4">${duration}</td>
+                    <td class="py-2.5 px-4 text-slate-400 text-[11px]">${timeStr}</td>
+                    <td class="py-2.5 px-4 font-mono text-[11px] text-slate-400 select-all" title="${r.correlationId || ''}">${corrIdShort}</td>
+                    <td class="py-2.5 px-4 text-right">
+                        ${r.errorMessage ? `
+                            <button onclick="alert('Error Message:\n${escapeHtml(r.errorMessage)}')" class="px-2 py-0.5 rounded bg-rose-950/60 text-rose-300 text-[10px] border border-rose-800">
+                                View Error
+                            </button>
+                        ` : `<span class="text-slate-600 text-[11px]">&mdash;</span>`}
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        async function clearExecutionHistory() {
+            if (!confirm('Clear all in-memory execution audit records?')) return;
+            try {
+                const res = await fetch('/api/v1/jobs/history', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) throw new Error('Failed to clear history');
+                showToast('Execution history cleared', 'success');
+                fetchExecutionHistory();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // ==========================================
+        // REST API: CLUSTER & ENGINE METADATA
+        // ==========================================
+        async function fetchClusterMetadata() {
+            try {
+                const res = await fetch('/api/v1/jobs/cluster-metadata', {
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) return;
+                clusterMetadata = await res.json();
+                renderClusterMetadata(clusterMetadata);
+            } catch (err) {
+                console.error('Failed to query cluster metadata:', err);
+            }
+        }
+
+        function renderClusterMetadata(meta) {
+            document.getElementById('statHealth').innerText = meta.status || 'RUNNING';
+            document.getElementById('statNodeId').innerText = meta.schedulerInstanceId || 'Clustered';
+
+            const grid = document.getElementById('clusterMetadataGrid');
+            grid.innerHTML = `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-2">
+                    <p class="text-xs uppercase text-slate-400 font-semibold">Instance Identifier</p>
+                    <p class="text-sm font-mono font-bold text-white break-all">${meta.schedulerInstanceId}</p>
+                    <p class="text-[11px] text-slate-500">Scheduler Name: <span class="text-blue-400 font-mono">${meta.schedulerName}</span></p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-2">
+                    <p class="text-xs uppercase text-slate-400 font-semibold">Persistence & JobStore</p>
+                    <p class="text-sm font-mono font-bold text-emerald-400">${meta.jobStoreClass}</p>
+                    <p class="text-[11px] text-slate-500">Clustered Mode: <span class="font-bold text-emerald-400">${meta.clustered ? 'ACTIVE (PostgreSQL QRTZ_LOCKS)' : 'False'}</span></p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-2">
+                    <p class="text-xs uppercase text-slate-400 font-semibold">Worker Thread Pool</p>
+                    <p class="text-sm font-mono font-bold text-cyan-400">${meta.threadPoolClass}</p>
+                    <p class="text-[11px] text-slate-500">Capacity: <span class="font-bold text-white">${meta.threadPoolSize} concurrent threads</span></p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-2">
+                    <p class="text-xs uppercase text-slate-400 font-semibold">Engine Version & Uptime</p>
+                    <p class="text-sm font-bold text-purple-400 font-mono">Quartz v${meta.version || '2.3.2'}</p>
+                    <p class="text-[11px] text-slate-500">Running Since: <span class="text-slate-300 font-mono">${meta.runningSince ? new Date(meta.runningSince).toLocaleString() : '--'}</span></p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-2">
+                    <p class="text-xs uppercase text-slate-400 font-semibold">Historical Lifetime Executions</p>
+                    <p class="text-2xl font-bold text-white font-mono">${meta.numberOfJobsExecuted}</p>
+                    <p class="text-[11px] text-slate-500">Total triggers fired since boot</p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-2">
+                    <p class="text-xs uppercase text-slate-400 font-semibold">Active In-Flight Workers</p>
+                    <p class="text-2xl font-bold text-blue-400 font-mono">${meta.currentlyExecutingCount}</p>
+                    <p class="text-[11px] text-slate-500">Jobs running at this exact instant</p>
+                </div>
+            `;
+        }
+
+        // ==========================================
+        // SLIDE-OVER DRAWER: JOB INSPECTOR
+        // ==========================================
+        function openInspector(group, name) {
+            const job = allJobs.find(j => j.jobGroup === group && j.jobName === name);
+            if (!job) return;
+            currentInspectedJob = job;
+
+            document.getElementById('inspectJobName').innerText = job.jobName;
+            document.getElementById('inspectJobGroup').innerText = `group: ${job.jobGroup}`;
+            document.getElementById('inspectJobClass').innerText = job.jobClass;
+            document.getElementById('inspectDescription').innerText = job.description || 'No description provided';
+            document.getElementById('inspectDisallowConcurrent').innerText = job.concurrentExecutionDisallowed ? 'Disallowed' : 'Allowed';
+            document.getElementById('inspectDurable').innerText = job.durable ? 'True' : 'False';
+            document.getElementById('inspectRecovery').innerText = job.requestsRecovery ? 'True' : 'False';
+
+            // High-level human status badge
+            document.getElementById('inspectJobStateContainer').innerHTML = renderJobStatusBadge(job);
+
+            // Latest execution telemetry
+            const latestBox = document.getElementById('inspectLatestExecutionBox');
+            if (job.lastExecutionStatus) {
+                const color = job.lastExecutionStatus === 'SUCCESS' ? 'text-emerald-400' : 'text-rose-400';
+                const timeStr = job.lastExecutionTime ? new Date(job.lastExecutionTime).toLocaleString() : '--';
+                latestBox.innerHTML = `
+                    <div class="flex justify-between">
+                        <span>Outcome:</span>
+                        <span class="font-bold ${color}">${job.lastExecutionStatus}</span>
+                    </div>
+                    <div class="flex justify-between text-slate-400">
+                        <span>Duration:</span>
+                        <span class="text-emerald-400">${job.lastExecutionDurationMs != null ? job.lastExecutionDurationMs + 'ms' : '--'}</span>
+                    </div>
+                    <div class="flex justify-between text-slate-400">
+                        <span>Finished At:</span>
+                        <span class="text-slate-200">${timeStr}</span>
+                    </div>
+                `;
+            } else {
+                latestBox.innerHTML = '<span class="text-slate-500">No prior executions recorded yet.</span>';
+            }
+
+            const isPaused = job.jobStatus === 'PAUSED';
+            document.getElementById('inspectBtnPauseResume').innerText = isPaused ? 'Resume Job' : 'Pause Job';
+
+            // Triggers list
+            const triggersContainer = document.getElementById('inspectTriggersList');
+            if (!job.triggers || job.triggers.length === 0) {
+                triggersContainer.innerHTML = '<p class="text-slate-500 text-xs">No active triggers bound to this job.</p>';
+            } else {
+                triggersContainer.innerHTML = job.triggers.map(t => `
+                    <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1 font-mono text-[11px]">
+                        <div class="flex justify-between text-white font-bold">
+                            <span>${t.triggerGroup}.${t.triggerName}</span>
+                            <span class="text-blue-400">${t.type}</span>
+                        </div>
+                        <div class="flex justify-between text-slate-400">
+                            <span>Cron/Interval:</span>
+                            <span class="text-blue-300">${t.cronExpression || 'Fixed Interval'}</span>
+                        </div>
+                        <div class="flex justify-between text-slate-400">
+                            <span>Next Fire Time:</span>
+                            <span class="text-slate-200">${t.nextFireTime ? new Date(t.nextFireTime).toLocaleString() : '--'}</span>
+                        </div>
+                        <div class="flex justify-between text-slate-400">
+                            <span>Trigger State:</span>
+                            <span class="${t.state === 'PAUSED' ? 'text-amber-400 font-semibold' : 'text-emerald-400 font-semibold'}">${t.state === 'NORMAL' ? 'SCHEDULED' : t.state}</span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // JobDataMap
+            const dataMapStr = JSON.stringify(job.jobData || {}, null, 2);
+            document.getElementById('inspectJobDataJson').innerText = dataMapStr;
+
+            document.getElementById('jobInspectorDrawer').classList.remove('hidden');
+        }
+
+        function closeInspector() {
+            document.getElementById('jobInspectorDrawer').classList.add('hidden');
+            currentInspectedJob = null;
+        }
+
+        function copyJobDataJson() {
+            if (!currentInspectedJob) return;
+            navigator.clipboard.writeText(JSON.stringify(currentInspectedJob.jobData || {}, null, 2));
+            showToast('Job Data Map copied to clipboard', 'info');
+        }
+
+        function openTriggerModalFromInspector() {
+            if (!currentInspectedJob) return;
+            openTriggerModal(currentInspectedJob.jobGroup, currentInspectedJob.jobName);
+            closeInspector();
+        }
+
+        function togglePauseFromInspector() {
+            if (!currentInspectedJob) return;
+            if (currentInspectedJob.jobStatus === 'PAUSED') {
+                resumeJob(currentInspectedJob.jobGroup, currentInspectedJob.jobName);
+            } else {
+                pauseJob(currentInspectedJob.jobGroup, currentInspectedJob.jobName);
+            }
+            closeInspector();
+        }
+
+        function deleteFromInspector() {
+            if (!currentInspectedJob) return;
+            deleteJob(currentInspectedJob.jobGroup, currentInspectedJob.jobName);
+            closeInspector();
+        }
+
+        // ==========================================
+        // JOB OPERATIONS & MODALS
+        // ==========================================
+        function openTriggerModal(group, name) {
+            const job = allJobs.find(j => j.jobGroup === group && j.jobName === name);
+            document.getElementById('triggerModalGroup').value = group;
+            document.getElementById('triggerModalName').value = name;
+            document.getElementById('triggerModalTargetLabel').innerText = `${group}.${name}`;
+            document.getElementById('triggerModalCustomData').value = job && job.jobData ? JSON.stringify(job.jobData, null, 2) : '';
+            document.getElementById('triggerJobModal').classList.remove('hidden');
+        }
+
+        async function handleTriggerWithData(e) {
+            e.preventDefault();
+            const group = document.getElementById('triggerModalGroup').value;
+            const name = document.getElementById('triggerModalName').value;
+            let customData = null;
+            const raw = document.getElementById('triggerModalCustomData').value.trim();
+            if (raw) {
+                try { customData = JSON.parse(raw); }
+                catch (err) { alert('Invalid JSON in custom execution parameters'); return; }
+            }
+
+            try {
+                const res = await fetch(`/api/v1/jobs/${group}/${name}/trigger`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': getAuthHeader()
+                    },
+                    body: customData ? JSON.stringify(customData) : null
+                });
+                if (!res.ok) throw new Error('Failed to trigger job');
+                showToast(`Job '${name}' triggered immediately!`, 'success');
+                closeModal('triggerJobModal');
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function pauseJob(group, name) {
+            try {
+                const res = await fetch(`/api/v1/jobs/${group}/${name}/pause`, {
+                    method: 'POST',
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) throw new Error('Failed to pause job');
+                showToast(`Job '${name}' paused`, 'success');
+                fetchJobs();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function resumeJob(group, name) {
+            try {
+                const res = await fetch(`/api/v1/jobs/${group}/${name}/resume`, {
+                    method: 'POST',
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) throw new Error('Failed to resume job');
+                showToast(`Job '${name}' resumed`, 'success');
+                fetchJobs();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function deleteJob(group, name) {
+            if (!confirm(`Are you sure you want to delete job '${name}' from cluster?`)) return;
+            try {
+                const res = await fetch(`/api/v1/jobs/${group}/${name}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': getAuthHeader() }
+                });
+                if (!res.ok) throw new Error('Failed to delete job');
+                showToast(`Job '${name}' deleted successfully`, 'success');
+                fetchJobs();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function globalPauseAll() {
+            if (!confirm('Globally pause all triggers across cluster?')) return;
+            try {
+                await fetch('/api/v1/jobs/pause-all', { method: 'POST', headers: { 'Authorization': getAuthHeader() } });
+                showToast('Global scheduler paused', 'info');
+                fetchJobs();
+            } catch (err) { showToast(err.message, 'error'); }
+        }
+
+        async function globalResumeAll() {
+            try {
+                await fetch('/api/v1/jobs/resume-all', { method: 'POST', headers: { 'Authorization': getAuthHeader() } });
+                showToast('Global scheduler resumed', 'success');
+                fetchJobs();
+            } catch (err) { showToast(err.message, 'error'); }
+        }
+
+        // ==========================================
+        // CREATE & RESCHEDULE MODALS
+        // ==========================================
+        function openCreateModal() {
+            document.getElementById('createJobModal').classList.remove('hidden');
+        }
+
+        function openRescheduleModal(group, name, currentCron) {
+            document.getElementById('rescheduleGroup').value = group;
+            document.getElementById('rescheduleName').value = name;
+            document.getElementById('rescheduleTargetLabel').innerText = `${group}.${name}`;
+            document.getElementById('rescheduleCronExpr').value = currentCron || '0 0/15 * * * ?';
+            document.getElementById('rescheduleModal').classList.remove('hidden');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        function handleClassPreset(val) {
+            const customInput = document.getElementById('createCustomClass');
+            if (val === 'custom') {
+                customInput.classList.remove('hidden');
+                customInput.focus();
+            } else {
+                customInput.classList.add('hidden');
+            }
+        }
+
+        function toggleTriggerInputs(type) {
+            document.getElementById('cronInputGroup').classList.toggle('hidden', type !== 'CRON');
+            document.getElementById('cronPresetGroup').classList.toggle('hidden', type !== 'CRON');
+            document.getElementById('intervalInputGroup').classList.toggle('hidden', type !== 'SIMPLE_INTERVAL');
+        }
+
+        function applyCronPreset(expr) {
+            if (expr !== 'custom') {
+                document.getElementById('createCronExpr').value = expr;
+                updateCronExplanation(expr);
+            }
+        }
+
+        function updateCronExplanation(expr) {
+            const el = document.getElementById('cronExplanationText');
+            if (expr.includes('0/5')) el.innerText = 'Runs every 5 minutes.';
+            else if (expr.includes('0/10')) el.innerText = 'Runs every 10 minutes.';
+            else if (expr.includes('0/15')) el.innerText = 'Runs every 15 minutes.';
+            else if (expr.includes('0 0 * * *')) el.innerText = 'Runs every hour at the top of the hour.';
+            else if (expr.includes('0 0 0 * *')) el.innerText = 'Runs once every night at midnight (00:00).';
+            else if (expr.includes('MON-FRI')) el.innerText = 'Runs on weekdays Monday through Friday.';
+            else el.innerText = `Quartz expression: ${expr}`;
+        }
+
+        async function handleCreateJob(e) {
+            e.preventDefault();
+            const classSelect = document.getElementById('createJobClassSelect').value;
+            const jobClass = classSelect === 'custom'
+                ? document.getElementById('createCustomClass').value
+                : classSelect;
+
+            let jobData = null;
+            const jobDataRaw = document.getElementById('createJobDataJson').value.trim();
+            if (jobDataRaw) {
+                try { jobData = JSON.parse(jobDataRaw); }
+                catch (err) { alert('Invalid JSON in Job Data Map'); return; }
+            }
+
+            const payload = {
+                jobName: document.getElementById('createJobName').value.trim(),
+                jobGroup: document.getElementById('createJobGroup').value.trim(),
+                jobClass: jobClass,
+                description: document.getElementById('createDescription').value.trim(),
+                triggerType: document.getElementById('createTriggerType').value,
+                cronExpression: document.getElementById('createCronExpr').value.trim(),
+                intervalInSeconds: parseInt(document.getElementById('createIntervalSecs').value) || null,
+                jobData: jobData,
+                durable: true
+            };
+
+            try {
+                const res = await fetch('/api/v1/jobs', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': getAuthHeader()
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) {
+                    const errorObj = await res.json();
+                    throw new Error(errorObj.detail || 'Failed to create job');
+                }
+
+                showToast(`Job '${payload.jobName}' registered successfully`, 'success');
+                closeModal('createJobModal');
+                document.getElementById('createJobForm').reset();
+                fetchJobs();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function handleReschedule(e) {
+            e.preventDefault();
+            const group = document.getElementById('rescheduleGroup').value;
+            const name = document.getElementById('rescheduleName').value;
+            const payload = {
+                triggerType: document.getElementById('rescheduleTriggerType').value,
+                cronExpression: document.getElementById('rescheduleCronExpr').value.trim()
+            };
+
+            try {
+                const res = await fetch(`/api/v1/jobs/${group}/${name}/reschedule`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': getAuthHeader()
+                    },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Failed to reschedule trigger');
+                showToast(`Job '${name}' rescheduled successfully!`, 'success');
+                closeModal('rescheduleModal');
+                fetchJobs();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        function toggleAutoRefresh(interval) {
+            if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+            const val = parseInt(interval);
+            if (val > 0) {
+                autoRefreshTimer = setInterval(refreshCurrentTab, val);
+            }
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;")
+                       .replace(/</g, "&lt;")
+                       .replace(/>/g, "&gt;")
+                       .replace(/"/g, "&quot;")
+                       .replace(/'/g, "&#039;")
+                       .replace(/\n/g, "\\n");
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            let color = 'bg-slate-800 border-slate-700 text-white';
+            if (type === 'success') color = 'bg-emerald-900 border-emerald-600 text-emerald-100';
+            if (type === 'error') color = 'bg-rose-900 border-rose-600 text-rose-100';
+            if (type === 'info') color = 'bg-blue-900 border-blue-600 text-blue-100';
+
+            toast.className = `pointer-events-auto px-4 py-2.5 rounded-xl border shadow-xl text-xs flex items-center space-x-2 transition-all duration-300 transform translate-y-2 opacity-0 ${color}`;
+            toast.innerHTML = `<span>${message}</span>`;
+            container.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 3800);
+            }, 3800);
+        }
+    </script>
+</body>
+</html>
