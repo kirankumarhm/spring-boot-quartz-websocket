@@ -11,3 +11,9 @@ spring:
 
   quartz:
     job-store-type: memory
+
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always

@@ -27,3 +27,9 @@ spring:
       org.quartz.jobStore.clusterCheckinInterval: 10000
       org.quartz.jobStore.misfireThreshold: 60000
 
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: ${BATCH_INIT_SCHEMA:always}
+

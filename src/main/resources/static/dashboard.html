@@ -223,6 +223,7 @@
                         <button onclick="setStateFilter('IN_PROGRESS')" id="filterState-IN_PROGRESS" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">In Progress</button>
                         <button onclick="setStateFilter('PAUSED')" id="filterState-PAUSED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Paused</button>
                         <button onclick="setStateFilter('COMPLETED')" id="filterState-COMPLETED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Completed</button>
+                        <button onclick="setStateFilter('BATCH')" id="filterState-BATCH" class="state-pill px-2.5 py-1 rounded text-cyan-400 hover:text-cyan-300">Batch Jobs</button>
                     </div>
 
                     <!-- View Switcher (Table vs Grid) -->
@@ -544,6 +545,7 @@
                 <div>
                     <label class="block text-slate-400 mb-1 font-medium">Implementation Class *</label>
                     <select id="createJobClassSelect" onchange="handleClassPreset(this.value)" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white">
+                        <option value="com.enterprise.quartz.batch.bridge.SpringBatchQuartzJobLauncher">SpringBatchQuartzJobLauncher (Spring Batch Bridge)</option>
                         <option value="com.enterprise.quartz.sample.SampleEmailJob">SampleEmailJob (com.enterprise.quartz.sample.SampleEmailJob)</option>
                         <option value="com.enterprise.quartz.sample.SampleDataCleanupJob">SampleDataCleanupJob (com.enterprise.quartz.sample.SampleDataCleanupJob)</option>
                         <option value="custom">-- Custom FQCN --</option>
@@ -1043,6 +1045,7 @@
                 else if (currentStateFilter === 'IN_PROGRESS') matchesState = status === 'IN_PROGRESS' || j.currentlyExecuting;
                 else if (currentStateFilter === 'PAUSED') matchesState = status === 'PAUSED';
                 else if (currentStateFilter === 'COMPLETED') matchesState = status === 'COMPLETED';
+                else if (currentStateFilter === 'BATCH') matchesState = (j.jobClass && j.jobClass.includes('SpringBatch')) || (j.jobData && j.jobData.batchJobName != null);
 
                 return matchesQuery && matchesGroup && matchesState;
             });
@@ -1087,9 +1090,16 @@
                         <div class="text-[11px] text-slate-500 font-mono">group: ${job.jobGroup}</div>
                     </td>
                     <td class="py-3 px-4">
-                        <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px] border border-slate-700/80" title="${job.jobClass}">
-                            ${simpleClass}
-                        </span>
+                        <div class="flex items-center space-x-1.5 flex-wrap">
+                            <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px] border border-slate-700/80" title="${job.jobClass}">
+                                ${simpleClass}
+                            </span>
+                            ${job.jobData && job.jobData.batchJobName ? `
+                                <span class="px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 font-mono text-[10px] border border-cyan-800/60 font-semibold" title="Spring Batch Pipeline: ${job.jobData.batchJobName}">
+                                    BATCH: ${job.jobData.batchJobName}
+                                </span>
+                            ` : ''}
+                        </div>
                     </td>
                     <td class="py-3 px-4 text-xs font-mono">
                         ${cronOrInterval}
@@ -1647,11 +1657,18 @@
 
         function handleClassPreset(val) {
             const customInput = document.getElementById('createCustomClass');
+            const dataMapInput = document.getElementById('createJobDataJson');
             if (val === 'custom') {
                 customInput.classList.remove('hidden');
                 customInput.focus();
             } else {
                 customInput.classList.add('hidden');
+            }
+
+            if (val.includes('SpringBatchQuartzJobLauncher')) {
+                if (!dataMapInput.value.trim() || dataMapInput.value.trim() === '{}') {
+                    dataMapInput.value = '{\n  "batchJobName": "product-import-batch-job"\n}';
+                }
             }
         }
 
