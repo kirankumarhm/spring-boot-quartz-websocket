@@ -34,7 +34,14 @@ public class SampleEmailJob implements Job {
 
         try {
             // Simulate work (e.g., SMTP dispatch)
-            Thread.sleep(500);
+            long sleepMs = 1500L;
+            Object sleepVal = data.get("sleepMs");
+            if (sleepVal instanceof Number n) {
+                sleepMs = n.longValue();
+            } else if (sleepVal instanceof String s) {
+                try { sleepMs = Long.parseLong(s); } catch (NumberFormatException ignored) {}
+            }
+            Thread.sleep(sleepMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new JobExecutionException("Email dispatch interrupted", e);

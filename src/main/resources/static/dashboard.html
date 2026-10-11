@@ -218,12 +218,12 @@
 
                     <!-- State Filter Pills -->
                     <div class="flex items-center bg-slate-900 rounded-lg p-1 border border-slate-700 text-xs space-x-1">
-                        <button onclick="setStateFilter('ALL')" id="filterState-ALL" class="state-pill px-2.5 py-1 rounded bg-blue-600 text-white font-semibold">All</button>
-                        <button onclick="setStateFilter('SCHEDULED')" id="filterState-SCHEDULED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Scheduled</button>
-                        <button onclick="setStateFilter('IN_PROGRESS')" id="filterState-IN_PROGRESS" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">In Progress</button>
-                        <button onclick="setStateFilter('PAUSED')" id="filterState-PAUSED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Paused</button>
-                        <button onclick="setStateFilter('COMPLETED')" id="filterState-COMPLETED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white">Completed</button>
-                        <button onclick="setStateFilter('BATCH')" id="filterState-BATCH" class="state-pill px-2.5 py-1 rounded text-cyan-400 hover:text-cyan-300">Batch Jobs</button>
+                        <button onclick="setStateFilter('ALL')" id="filterState-ALL" class="state-pill px-2.5 py-1 rounded bg-blue-600 text-white font-semibold flex items-center space-x-1"><span>All</span><span id="pillCount-ALL" class="text-[10px] opacity-75 font-mono"></span></button>
+                        <button onclick="setStateFilter('SCHEDULED')" id="filterState-SCHEDULED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white flex items-center space-x-1"><span>Scheduled</span><span id="pillCount-SCHEDULED" class="text-[10px] opacity-75 font-mono"></span></button>
+                        <button onclick="setStateFilter('IN_PROGRESS')" id="filterState-IN_PROGRESS" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white flex items-center space-x-1"><span>In Progress</span><span id="pillCount-IN_PROGRESS" class="text-[10px] opacity-75 font-mono"></span></button>
+                        <button onclick="setStateFilter('PAUSED')" id="filterState-PAUSED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white flex items-center space-x-1"><span>Paused</span><span id="pillCount-PAUSED" class="text-[10px] opacity-75 font-mono"></span></button>
+                        <button onclick="setStateFilter('COMPLETED')" id="filterState-COMPLETED" class="state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white flex items-center space-x-1"><span>Completed</span><span id="pillCount-COMPLETED" class="text-[10px] opacity-75 font-mono"></span></button>
+                        <button onclick="setStateFilter('BATCH')" id="filterState-BATCH" class="state-pill px-2.5 py-1 rounded text-cyan-400 hover:text-cyan-300 flex items-center space-x-1"><span>Batch Jobs</span><span id="pillCount-BATCH" class="text-[10px] opacity-75 font-mono"></span></button>
                     </div>
 
                     <!-- View Switcher (Table vs Grid) -->
@@ -905,51 +905,70 @@
                 if (targetJob) {
                     targetJob.jobStatus = 'IN_PROGRESS';
                     targetJob.currentlyExecuting = true;
-                    updateJobRowStatus(targetJob);
                 }
+                // Sync in-flight workers array
+                if (!executingJobs.some(e => e.jobGroup === event.jobGroup && e.jobName === event.jobName)) {
+                    executingJobs.push({
+                        jobGroup: event.jobGroup,
+                        jobName: event.jobName,
+                        triggerGroup: event.jobGroup,
+                        triggerName: `${event.jobName}-trigger`,
+                        fireTime: event.timestamp || new Date().toISOString(),
+                        durationMs: 0
+                    });
+                    renderExecutingJobs(executingJobs);
+                }
+                renderJobs(filterJobList(allJobs));
+                updateStats(allJobs);
+                if (targetJob) updateJobRowStatus(targetJob);
                 fetchExecutingJobs();
-            } else if (event.eventType === 'JOB_COMPLETED') {
-                showToast(`✅ [COMPLETED] ${event.jobGroup}.${event.jobName} finished in ${event.durationMs}ms`, 'success');
+            } else if (event.eventType === 'JOB_COMPLETED' || event.eventType === 'JOB_FAILED') {
+                const isSuccess = event.eventType === 'JOB_COMPLETED';
+                const toastMsg = isSuccess
+                    ? `✅ [COMPLETED] ${event.jobGroup}.${event.jobName} finished in ${event.durationMs}ms`
+                    : `❌ [FAILED] ${event.jobGroup}.${event.jobName}: ${event.message || 'Execution error'}`;
+                showToast(toastMsg, isSuccess ? 'success' : 'error');
+
                 if (targetJob) {
                     targetJob.currentlyExecuting = false;
-                    targetJob.jobStatus = 'SCHEDULED';
-                    targetJob.lastExecutionStatus = 'SUCCESS';
+                    targetJob.jobStatus = isSuccess ? 'SCHEDULED' : 'FAILED';
+                    targetJob.lastExecutionStatus = isSuccess ? 'SUCCESS' : 'FAILED';
                     targetJob.lastExecutionDurationMs = event.durationMs;
-                    targetJob.lastExecutionTime = new Date().toISOString();
-                    updateJobRowStatus(targetJob);
+                    targetJob.lastExecutionTime = event.timestamp || new Date().toISOString();
                 }
-                fetchExecutingJobs();
+
+                // Remove from in-flight workers array
+                executingJobs = executingJobs.filter(e => !(e.jobGroup === event.jobGroup && e.jobName === event.jobName));
+                renderExecutingJobs(executingJobs);
+
+                renderJobs(filterJobList(allJobs));
+                updateStats(allJobs);
+                if (targetJob) updateJobRowStatus(targetJob);
                 fetchExecutionHistory();
-                setTimeout(fetchJobs, 600);
-            } else if (event.eventType === 'JOB_FAILED') {
-                showToast(`❌ [FAILED] ${event.jobGroup}.${event.jobName}: ${event.message}`, 'error');
-                if (targetJob) {
-                    targetJob.currentlyExecuting = false;
-                    targetJob.jobStatus = 'FAILED';
-                    targetJob.lastExecutionStatus = 'FAILED';
-                    targetJob.lastExecutionTime = new Date().toISOString();
-                    updateJobRowStatus(targetJob);
-                }
-                fetchExecutingJobs();
-                fetchExecutionHistory();
-                setTimeout(fetchJobs, 600);
+                setTimeout(fetchJobs, 800);
             } else if (event.eventType === 'JOB_PAUSED') {
                 if (targetJob) {
                     targetJob.jobStatus = 'PAUSED';
-                    updateJobRowStatus(targetJob);
                 }
+                renderJobs(filterJobList(allJobs));
+                updateStats(allJobs);
+                if (targetJob) updateJobRowStatus(targetJob);
                 setTimeout(fetchJobs, 400);
             } else if (event.eventType === 'JOB_RESUMED') {
                 if (targetJob) {
                     targetJob.jobStatus = 'SCHEDULED';
-                    updateJobRowStatus(targetJob);
                 }
+                renderJobs(filterJobList(allJobs));
+                updateStats(allJobs);
+                if (targetJob) updateJobRowStatus(targetJob);
                 setTimeout(fetchJobs, 400);
             } else if (event.eventType === 'JOB_DELETED') {
                 if (targetJob) {
                     targetJob.jobStatus = 'DELETED';
-                    updateJobRowStatus(targetJob);
                 }
+                renderJobs(filterJobList(allJobs));
+                updateStats(allJobs);
+                if (targetJob) updateJobRowStatus(targetJob);
                 setTimeout(fetchJobs, 500);
             } else {
                 fetchJobs();
@@ -1013,9 +1032,12 @@
         function setStateFilter(state) {
             currentStateFilter = state;
             document.querySelectorAll('.state-pill').forEach(btn => {
-                btn.className = 'state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white';
+                btn.className = 'state-pill px-2.5 py-1 rounded text-slate-400 hover:text-white flex items-center space-x-1';
             });
-            document.getElementById(`filterState-${state}`).className = 'state-pill px-2.5 py-1 rounded bg-blue-600 text-white font-semibold';
+            const activeBtn = document.getElementById(`filterState-${state}`);
+            if (activeBtn) {
+                activeBtn.className = 'state-pill px-2.5 py-1 rounded bg-blue-600 text-white font-semibold flex items-center space-x-1';
+            }
             renderJobs(filterJobList(allJobs));
         }
 
@@ -1033,19 +1055,43 @@
             const selectedGroup = document.getElementById('groupFilter').value;
 
             return jobs.filter(j => {
-                const matchesQuery = j.jobName.toLowerCase().includes(query) ||
+                const matchesQuery = !query ||
+                                     j.jobName.toLowerCase().includes(query) ||
                                      j.jobGroup.toLowerCase().includes(query) ||
-                                     j.jobClass.toLowerCase().includes(query);
+                                     j.jobClass.toLowerCase().includes(query) ||
+                                     (j.description && j.description.toLowerCase().includes(query)) ||
+                                     (j.jobData && JSON.stringify(j.jobData).toLowerCase().includes(query));
                 const matchesGroup = !selectedGroup || j.jobGroup === selectedGroup;
 
                 let matchesState = true;
-                const status = j.jobStatus || (j.currentlyExecuting ? 'IN_PROGRESS' : 'SCHEDULED');
+                const isCurrentlyRunning = j.currentlyExecuting === true || 
+                                           j.jobStatus === 'IN_PROGRESS' || 
+                                           (Array.isArray(executingJobs) && executingJobs.some(e => e.jobGroup === j.jobGroup && e.jobName === j.jobName));
 
-                if (currentStateFilter === 'SCHEDULED') matchesState = status === 'SCHEDULED';
-                else if (currentStateFilter === 'IN_PROGRESS') matchesState = status === 'IN_PROGRESS' || j.currentlyExecuting;
-                else if (currentStateFilter === 'PAUSED') matchesState = status === 'PAUSED';
-                else if (currentStateFilter === 'COMPLETED') matchesState = status === 'COMPLETED';
-                else if (currentStateFilter === 'BATCH') matchesState = (j.jobClass && j.jobClass.includes('SpringBatch')) || (j.jobData && j.jobData.batchJobName != null);
+                const isPaused = j.jobStatus === 'PAUSED' || 
+                                 (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'PAUSED'));
+
+                const hasCompleted = j.jobStatus === 'COMPLETED' || 
+                                     j.lastExecutionStatus === 'SUCCESS' || 
+                                     j.lastExecutionStatus === 'COMPLETED' || 
+                                     (j.triggers && j.triggers.some(t => t.state === 'COMPLETE'));
+
+                const isScheduled = (j.jobStatus === 'SCHEDULED' || j.jobStatus === 'NORMAL' || j.jobStatus === 'WAITING' || 
+                                     (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'NORMAL' || t.state === 'WAITING'))) && 
+                                     !isPaused;
+
+                if (currentStateFilter === 'SCHEDULED') {
+                    matchesState = isScheduled;
+                } else if (currentStateFilter === 'IN_PROGRESS') {
+                    matchesState = isCurrentlyRunning;
+                } else if (currentStateFilter === 'PAUSED') {
+                    matchesState = isPaused;
+                } else if (currentStateFilter === 'COMPLETED') {
+                    matchesState = hasCompleted && !isCurrentlyRunning;
+                } else if (currentStateFilter === 'BATCH') {
+                    matchesState = (j.jobClass && j.jobClass.includes('SpringBatch')) || 
+                                   (j.jobData && j.jobData.batchJobName != null);
+                }
 
                 return matchesQuery && matchesGroup && matchesState;
             });
@@ -1063,7 +1109,34 @@
         function renderTableView(jobs) {
             const tbody = document.getElementById('jobsTableBody');
             if (!jobs || jobs.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-500">No matching Quartz jobs found in cluster.</td></tr>`;
+                let emptyMsg = 'No matching Quartz jobs found in cluster.';
+                let subMsg = '';
+                if (currentStateFilter === 'IN_PROGRESS') {
+                    emptyMsg = 'No Jobs Currently In Progress';
+                    subMsg = 'All scheduler worker threads are idle and waiting for triggers. Click <span class="text-blue-400 font-semibold cursor-pointer" onclick="openTriggerModal(\'maintenance\', \'db-vacuum-cleanup\')">"Trigger"</span> on any job to run it immediately and observe real-time in-flight execution.';
+                } else if (currentStateFilter === 'COMPLETED') {
+                    emptyMsg = 'No Completed Executions Found';
+                    subMsg = 'Jobs will appear here once an execution completes with duration and status telemetry.';
+                } else if (currentStateFilter === 'PAUSED') {
+                    emptyMsg = 'No Paused Jobs';
+                    subMsg = 'All registered jobs are active and scheduled across the cluster.';
+                } else if (currentStateFilter === 'BATCH') {
+                    emptyMsg = 'No Spring Batch Jobs Found';
+                    subMsg = 'Click <span class="text-blue-400 font-semibold cursor-pointer" onclick="openCreateModal()">"+ Register New Job"</span> and select the Spring Batch preset to register an ETL pipeline.';
+                }
+
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="py-12 text-center">
+                            <div class="flex flex-col items-center justify-center space-y-2">
+                                <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 font-bold text-base">
+                                    ${currentStateFilter === 'IN_PROGRESS' ? '<span class="w-2.5 h-2.5 rounded-full bg-blue-400 status-pulse"></span>' : '&bull;'}
+                                </div>
+                                <p class="text-sm font-semibold text-slate-300">${emptyMsg}</p>
+                                ${subMsg ? `<p class="text-xs text-slate-500 max-w-md">${subMsg}</p>` : ''}
+                            </div>
+                        </td>
+                    </tr>`;
                 return;
             }
 
@@ -1155,7 +1228,26 @@
         function renderGridView(jobs) {
             const grid = document.getElementById('jobsGridView');
             if (!jobs || jobs.length === 0) {
-                grid.innerHTML = '<div class="col-span-3 text-center py-12 text-slate-500 text-xs">No matching jobs found.</div>';
+                let emptyMsg = 'No matching jobs found.';
+                let subMsg = '';
+                if (currentStateFilter === 'IN_PROGRESS') {
+                    emptyMsg = 'No Jobs Currently In Progress';
+                    subMsg = 'All scheduler worker threads are idle. Trigger any job to observe live execution.';
+                } else if (currentStateFilter === 'COMPLETED') {
+                    emptyMsg = 'No Completed Executions Found';
+                    subMsg = 'Jobs will appear here once an execution completes with duration telemetry.';
+                } else if (currentStateFilter === 'PAUSED') {
+                    emptyMsg = 'No Paused Jobs';
+                    subMsg = 'All jobs are active and scheduled across the cluster.';
+                }
+                grid.innerHTML = `
+                    <div class="col-span-3 text-center py-12 text-slate-500 text-xs flex flex-col items-center space-y-2">
+                        <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 font-bold text-base">
+                            ${currentStateFilter === 'IN_PROGRESS' ? '<span class="w-2.5 h-2.5 rounded-full bg-blue-400 status-pulse"></span>' : '&bull;'}
+                        </div>
+                        <p class="font-semibold text-slate-300 text-sm">${emptyMsg}</p>
+                        ${subMsg ? `<p class="text-slate-500 max-w-md">${subMsg}</p>` : ''}
+                    </div>`;
                 return;
             }
 
@@ -1217,13 +1309,29 @@
             const groups = new Set(jobs.map(j => j.jobGroup));
             document.getElementById('statGroupCount').innerText = `${groups.size} groups`;
 
-            const scheduled = jobs.filter(j => j.jobStatus === 'SCHEDULED' || (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'NORMAL'))).length;
+            const inProgress = jobs.filter(j => j.currentlyExecuting || j.jobStatus === 'IN_PROGRESS' || (Array.isArray(executingJobs) && executingJobs.some(e => e.jobGroup === j.jobGroup && e.jobName === j.jobName))).length;
             const paused = jobs.filter(j => j.jobStatus === 'PAUSED' || (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'PAUSED'))).length;
-            const inProgress = jobs.filter(j => j.jobStatus === 'IN_PROGRESS' || j.currentlyExecuting).length;
+            const scheduled = jobs.filter(j => (j.jobStatus === 'SCHEDULED' || j.jobStatus === 'NORMAL' || j.jobStatus === 'WAITING' || (!j.jobStatus && j.triggers && j.triggers.some(t => t.state === 'NORMAL'))) && !paused).length;
+            const completed = jobs.filter(j => !j.currentlyExecuting && (j.jobStatus === 'COMPLETED' || j.lastExecutionStatus === 'SUCCESS' || j.lastExecutionStatus === 'COMPLETED' || (j.triggers && j.triggers.some(t => t.state === 'COMPLETE')))).length;
+            const batch = jobs.filter(j => (j.jobClass && j.jobClass.includes('SpringBatch')) || (j.jobData && j.jobData.batchJobName != null)).length;
 
             document.getElementById('statActiveJobs').innerText = scheduled;
             document.getElementById('statPausedJobs').innerText = paused;
             document.getElementById('statExecutingJobs').innerText = inProgress;
+
+            // Update badge numbers on filter pills
+            const elAll = document.getElementById('pillCount-ALL');
+            if (elAll) elAll.innerText = `(${jobs.length})`;
+            const elSched = document.getElementById('pillCount-SCHEDULED');
+            if (elSched) elSched.innerText = `(${scheduled})`;
+            const elProg = document.getElementById('pillCount-IN_PROGRESS');
+            if (elProg) elProg.innerText = `(${inProgress})`;
+            const elPaused = document.getElementById('pillCount-PAUSED');
+            if (elPaused) elPaused.innerText = `(${paused})`;
+            const elComp = document.getElementById('pillCount-COMPLETED');
+            if (elComp) elComp.innerText = `(${completed})`;
+            const elBatch = document.getElementById('pillCount-BATCH');
+            if (elBatch) elBatch.innerText = `(${batch})`;
         }
 
         // ==========================================
@@ -1237,6 +1345,28 @@
                 if (!res.ok) return;
                 executingJobs = await res.json();
                 renderExecutingJobs(executingJobs);
+
+                // Synchronize in-flight state with allJobs
+                const executingKeys = new Set(executingJobs.map(e => `${e.jobGroup}.${e.jobName}`));
+                let anyChanged = false;
+                allJobs.forEach(j => {
+                    const key = `${j.jobGroup}.${j.jobName}`;
+                    const isRunning = executingKeys.has(key);
+                    if (j.currentlyExecuting !== isRunning) {
+                        j.currentlyExecuting = isRunning;
+                        if (isRunning) {
+                            j.jobStatus = 'IN_PROGRESS';
+                        } else if (j.jobStatus === 'IN_PROGRESS') {
+                            j.jobStatus = 'SCHEDULED';
+                        }
+                        anyChanged = true;
+                    }
+                });
+
+                if (anyChanged) {
+                    renderJobs(filterJobList(allJobs));
+                    updateStats(allJobs);
+                }
             } catch (err) {
                 console.error('Failed to fetch executing jobs:', err);
             }
@@ -1544,7 +1674,12 @@
             document.getElementById('triggerModalGroup').value = group;
             document.getElementById('triggerModalName').value = name;
             document.getElementById('triggerModalTargetLabel').innerText = `${group}.${name}`;
-            document.getElementById('triggerModalCustomData').value = job && job.jobData ? JSON.stringify(job.jobData, null, 2) : '';
+
+            let defaultData = job && job.jobData ? { ...job.jobData } : {};
+            if (!defaultData.sleepMs && !defaultData.batchJobName) {
+                defaultData.sleepMs = 2500;
+            }
+            document.getElementById('triggerModalCustomData').value = JSON.stringify(defaultData, null, 2);
             document.getElementById('triggerJobModal').classList.remove('hidden');
         }
 

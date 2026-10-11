@@ -25,7 +25,14 @@ public class SampleDataCleanupJob implements Job {
 
         try {
             // Simulate database purge operation
-            Thread.sleep(700);
+            long sleepMs = 1500L;
+            Object sleepVal = data.get("sleepMs");
+            if (sleepVal instanceof Number n) {
+                sleepMs = n.longValue();
+            } else if (sleepVal instanceof String s) {
+                try { sleepMs = Long.parseLong(s); } catch (NumberFormatException ignored) {}
+            }
+            Thread.sleep(sleepMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new JobExecutionException("Data cleanup interrupted", e);

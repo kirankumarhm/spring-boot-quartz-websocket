@@ -43,13 +43,19 @@ A production-grade, distributed scheduling microservice and operational control 
 ### 2. Spring Batch Filtered View
 ![Batch Filter View](screenshots/batch-filter.png)
 
-### 3. Slide-Over Job Inspector Drawer (Spring Batch Bridge Parameters)
+### 3. Real-Time "In Progress" Filter (WebSocket Synchronized Worker Activity)
+![In Progress Filter](screenshots/filter-in-progress-active.png)
+
+### 4. "Completed" Executions Filter (Duration Telemetry & Success Badges)
+![Completed Executions Filter](screenshots/filter-completed.png)
+
+### 5. Slide-Over Job Inspector Drawer (Spring Batch Bridge Parameters)
 ![Job Inspector Drawer](screenshots/inspector.png)
 
-### 4. Quartz Clustered Engine & Instance Topology
+### 6. Quartz Clustered Engine & Instance Topology
 ![Cluster Topology](screenshots/cluster.png)
 
-### 5. Job Execution History & Duration Audit Log
+### 7. Job Execution History & Duration Audit Log
 ![Execution History Audit](screenshots/history.png)
 
 ---
